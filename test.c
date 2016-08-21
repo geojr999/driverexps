@@ -11,6 +11,19 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include <linux/jiffies.h>
+#include <linux/kthread.h>
+#include<linux/slab.h>
+
+#ifndef SLEEP_MILLI_SEC
+#define SLEEP_MILLI_SEC(nMilliSec)\
+do { \
+long timeout = (nMilliSec) * HZ / 1000; \
+while(timeout > 0) \
+{ \
+timeout = schedule_timeout(timeout); \
+} \
+}while(0);
+#endif
 
 static dev_t first;        // Global variable for the first device number
 static struct cdev c_dev;  // Global variable for the character device structure
@@ -18,6 +31,21 @@ static struct class *cl;   // Global variable for the device class
 
 static int init_result;
 
+static struct task_struct * MyThread = NULL;
+
+static int MyPrintk(void *data)
+{
+char *mydata = kmalloc(strlen(data)+1,GFP_KERNEL);
+memset(mydata,'\0',strlen(data)+1);
+strncpy(mydata,data,strlen(data));
+while(!kthread_should_stop())
+{
+SLEEP_MILLI_SEC(1000);
+printk("%s\n",mydata);
+}
+kfree(mydata);
+return 0;
+}
 
 static ssize_t dummy_read( struct file* F, char *buf, size_t count, loff_t *f_pos )
 {
@@ -25,7 +53,7 @@ static ssize_t dummy_read( struct file* F, char *buf, size_t count, loff_t *f_po
 	j = jiffies;                      /* read the current value */
 	stamp_1    = j + HZ;              /* 1 second in the future */
 	stamp_half = j + HZ/2;            /* half a second */
-	stamp_n    = j + 55555 * HZ / 1000;   /* n milliseconds */   	
+	stamp_n    = j + 5 * HZ / 1000;   /* n milliseconds */   	
 	 printk("j %lu, stamp_1 %lu, stamp_half %lu, stamp_n %lu\n",j, stamp_1, stamp_half, stamp_n);
 
 	return 0;
@@ -39,11 +67,17 @@ static ssize_t dummy_write( struct file* F, const char *buf, size_t count, loff_
     switch( buf[0] )
     {
         case '0':
-    	printk("Executing WRITE.0\n");
+	MyThread = kthread_run(MyPrintk,"hello world","mythread"); 
+   	printk("Executing WRITE.0\n");
         break;
  
         case '1':
-   	 printk("Executing WRITE. 1\n");
+   	if(MyThread)
+	{
+	printk("stop MyThread\n");
+	kthread_stop(MyThread);
+	}
+	 printk("Executing WRITE. 1\n");
         break;
  
         default:
